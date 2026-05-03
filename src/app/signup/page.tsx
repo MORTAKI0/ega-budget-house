@@ -1,13 +1,57 @@
+"use client";
+
 import Link from "next/link";
-import { ArrowRight, Eye, Lock, Mail, ShieldCheck, User, Wallet } from "lucide-react";
+import { useAuthActions, useConvexAuth } from "@convex-dev/auth/react";
+import { ArrowRight, Eye, Loader2, Lock, Mail, ShieldCheck, User, Wallet } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { publicRoutes } from "@/lib/routes";
+import { defaultAppRoute, publicRoutes } from "@/lib/routes";
 
 export default function SignupPage() {
+  const router = useRouter();
+  const { isAuthenticated, isLoading } = useConvexAuth();
+  const { signIn } = useAuthActions();
+  const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      router.replace(defaultAppRoute);
+    }
+  }, [isAuthenticated, isLoading, router]);
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+
+    const formData = new FormData(event.currentTarget);
+    const password = String(formData.get("password") ?? "");
+    const confirmPassword = String(formData.get("confirmPassword") ?? "");
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    formData.set("flow", "signUp");
+    setIsSubmitting(true);
+
+    try {
+      await signIn("password", formData);
+      router.replace(defaultAppRoute);
+      router.refresh();
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : "Could not create account.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   return (
     <main className="relative isolate flex min-h-dvh items-center justify-center overflow-hidden bg-[#f7fbf5] px-4 py-8 text-slate-900 sm:px-6 lg:px-8">
       <BackgroundDecorations />
@@ -47,15 +91,16 @@ export default function SignupPage() {
               </p>
             </div>
 
-            <form className="mt-8 space-y-5">
+            <form onSubmit={handleSubmit} className="mt-8 space-y-5">
               <Field
                 id="full-name"
                 label="Full name"
-                name="fullName"
+                name="name"
                 type="text"
                 autoComplete="name"
                 placeholder="Your name"
                 icon={User}
+                disabled={isSubmitting}
               />
 
               <Field
@@ -66,6 +111,7 @@ export default function SignupPage() {
                 autoComplete="email"
                 placeholder="you@example.com"
                 icon={Mail}
+                disabled={isSubmitting}
               />
 
               <PasswordField
@@ -74,6 +120,7 @@ export default function SignupPage() {
                 name="password"
                 autoComplete="new-password"
                 placeholder="Create password"
+                disabled={isSubmitting}
               />
 
               <PasswordField
@@ -82,49 +129,27 @@ export default function SignupPage() {
                 name="confirmPassword"
                 autoComplete="new-password"
                 placeholder="Confirm password"
+                disabled={isSubmitting}
               />
 
-              <Label
-                htmlFor="terms"
-                className="items-start gap-3 rounded-xl border border-emerald-950/10 bg-emerald-50/40 p-4 text-sm leading-6 text-slate-600"
-              >
-                <input
-                  id="terms"
-                  name="terms"
-                  type="checkbox"
-                  className="mt-1 size-4 shrink-0 rounded border-emerald-950/20 text-emerald-600 accent-emerald-600"
-                />
-                <span>
-                  I agree to the{" "}
-                  <Link href="#" className="font-bold text-emerald-700 hover:text-emerald-800">
-                    Terms
-                  </Link>{" "}
-                  &amp;{" "}
-                  <Link href="#" className="font-bold text-emerald-700 hover:text-emerald-800">
-                    Privacy Policy
-                  </Link>
-                </span>
-              </Label>
+              {error ? (
+                <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                  {error}
+                </p>
+              ) : null}
 
               <Button
-                type="button"
+                type="submit"
                 size="lg"
+                disabled={isSubmitting}
                 className="h-14 w-full rounded-xl bg-emerald-600 text-base font-bold text-white shadow-[0_14px_28px_rgba(22,163,74,0.22)] hover:bg-emerald-700"
               >
-                Create account
-                <ArrowRight className="size-5" aria-hidden />
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                size="lg"
-                className="h-14 w-full rounded-xl border-emerald-950/10 bg-white text-base font-bold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800"
-              >
-                <span className="flex size-6 items-center justify-center rounded-full bg-slate-900 text-xs font-black text-white">
-                  G
-                </span>
-                Continue with Google
+                {isSubmitting ? "Creating account" : "Create account"}
+                {isSubmitting ? (
+                  <Loader2 className="size-5 animate-spin" aria-hidden />
+                ) : (
+                  <ArrowRight className="size-5" aria-hidden />
+                )}
               </Button>
             </form>
 
@@ -160,6 +185,7 @@ function Field({
   autoComplete,
   placeholder,
   icon: Icon,
+  disabled,
 }: {
   id: string;
   label: string;
@@ -168,6 +194,7 @@ function Field({
   autoComplete: string;
   placeholder: string;
   icon: typeof User;
+  disabled?: boolean;
 }) {
   return (
     <div className="space-y-2">
@@ -185,6 +212,8 @@ function Field({
           type={type}
           autoComplete={autoComplete}
           placeholder={placeholder}
+          required
+          disabled={disabled}
           className="h-13 rounded-xl border-emerald-950/10 bg-emerald-50/40 pr-4 pl-12 text-slate-900 placeholder:text-slate-400 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20"
         />
       </div>
@@ -198,12 +227,14 @@ function PasswordField({
   name,
   autoComplete,
   placeholder,
+  disabled,
 }: {
   id: string;
   label: string;
   name: string;
   autoComplete: string;
   placeholder: string;
+  disabled?: boolean;
 }) {
   return (
     <div className="space-y-2">
@@ -221,6 +252,8 @@ function PasswordField({
           type="password"
           autoComplete={autoComplete}
           placeholder={placeholder}
+          required
+          disabled={disabled}
           className="h-13 rounded-xl border-emerald-950/10 bg-emerald-50/40 pr-12 pl-12 text-slate-900 placeholder:text-slate-400 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20"
         />
         <Eye

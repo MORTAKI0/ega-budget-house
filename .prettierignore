@@ -4,6 +4,7 @@ coverage
 dist
 build
 .vercel
+.codex-tmp
 .env
 .env.*
 !.env.example

@@ -1,13 +1,49 @@
+"use client";
+
 import Link from "next/link";
-import { ArrowRight, Eye, Lock, Mail, ShieldCheck, Wallet } from "lucide-react";
+import { useAuthActions, useConvexAuth } from "@convex-dev/auth/react";
+import { ArrowRight, Eye, Loader2, Lock, Mail, ShieldCheck, Wallet } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { publicRoutes } from "@/lib/routes";
+import { defaultAppRoute, publicRoutes } from "@/lib/routes";
 
 export default function LoginPage() {
+  const router = useRouter();
+  const { isAuthenticated, isLoading } = useConvexAuth();
+  const { signIn } = useAuthActions();
+  const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) {
+      router.replace(defaultAppRoute);
+    }
+  }, [isAuthenticated, isLoading, router]);
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setIsSubmitting(true);
+
+    const formData = new FormData(event.currentTarget);
+    formData.set("flow", "signIn");
+
+    try {
+      await signIn("password", formData);
+      router.replace(defaultAppRoute);
+      router.refresh();
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : "Could not log in.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   return (
     <main className="relative isolate flex min-h-dvh items-center justify-center overflow-hidden bg-[#f7fbf5] px-4 py-8 text-slate-900 sm:px-6 lg:px-8">
       <BackgroundDecorations />
@@ -47,7 +83,7 @@ export default function LoginPage() {
               </p>
             </div>
 
-            <form className="mt-8 space-y-5">
+            <form onSubmit={handleSubmit} className="mt-8 space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="email" className="text-sm font-bold text-slate-700">
                   Email
@@ -63,6 +99,8 @@ export default function LoginPage() {
                     type="email"
                     autoComplete="email"
                     placeholder="you@example.com"
+                    required
+                    disabled={isSubmitting}
                     className="h-13 rounded-xl border-emerald-950/10 bg-emerald-50/40 pr-4 pl-12 text-slate-900 placeholder:text-slate-400 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20"
                   />
                 </div>
@@ -83,6 +121,8 @@ export default function LoginPage() {
                     type="password"
                     autoComplete="current-password"
                     placeholder="Enter password"
+                    required
+                    disabled={isSubmitting}
                     className="h-13 rounded-xl border-emerald-950/10 bg-emerald-50/40 pr-12 pl-12 text-slate-900 placeholder:text-slate-400 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20"
                   />
                   <Eye
@@ -92,28 +132,24 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-                <Label htmlFor="remember" className="cursor-pointer font-semibold text-slate-600">
-                  <input
-                    id="remember"
-                    name="remember"
-                    type="checkbox"
-                    className="size-4 rounded border-emerald-950/20 text-emerald-600 accent-emerald-600"
-                  />
-                  Remember me
-                </Label>
-                <Link href="#" className="font-bold text-emerald-700 hover:text-emerald-800">
-                  Forgot password?
-                </Link>
-              </div>
+              {error ? (
+                <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+                  {error}
+                </p>
+              ) : null}
 
               <Button
-                type="button"
+                type="submit"
                 size="lg"
+                disabled={isSubmitting}
                 className="h-14 w-full rounded-xl bg-emerald-600 text-base font-bold text-white shadow-[0_14px_28px_rgba(22,163,74,0.22)] hover:bg-emerald-700"
               >
-                Log in
-                <ArrowRight className="size-5" aria-hidden />
+                {isSubmitting ? "Logging in" : "Log in"}
+                {isSubmitting ? (
+                  <Loader2 className="size-5 animate-spin" aria-hidden />
+                ) : (
+                  <ArrowRight className="size-5" aria-hidden />
+                )}
               </Button>
             </form>
 

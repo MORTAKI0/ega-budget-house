@@ -1,7 +1,10 @@
+import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  ...authTables,
+
   categories: defineTable({
     name: v.string(),
     kind: v.union(v.literal("expense"), v.literal("income"), v.literal("both")),
