@@ -1,15 +1,5 @@
 import { mutation, query } from "./_generated/server";
-
-const defaultCategories = [
-  { name: "Transport", kind: "expense", sortOrder: 1 },
-  { name: "WiFi", kind: "expense", sortOrder: 2 },
-  { name: "Abonnement", kind: "expense", sortOrder: 3 },
-  { name: "Home Stuff", kind: "expense", sortOrder: 4 },
-  { name: "Coffee Outside", kind: "expense", sortOrder: 5 },
-  { name: "Food", kind: "expense", sortOrder: 6 },
-  { name: "Income", kind: "income", sortOrder: 7 },
-  { name: "Other", kind: "expense", sortOrder: 8 },
-] as const;
+import { DEFAULT_CATEGORY_DEFINITIONS } from "./categoryRules";
 
 export const list = query({
   args: {},
@@ -22,26 +12,40 @@ export const seedDefaults = mutation({
   args: {},
   handler: async (ctx) => {
     const existing = await ctx.db.query("categories").collect();
+    const existingByName = new Map(existing.map((category) => [category.name, category]));
+    let inserted = 0;
 
-    if (existing.length > 0) {
-      return {
-        inserted: 0,
-        skipped: true,
-      };
-    }
+    for (const category of DEFAULT_CATEGORY_DEFINITIONS) {
+      const current = existingByName.get(category.name);
 
-    for (const category of defaultCategories) {
+      if (current) {
+        if (
+          current.kind !== category.kind ||
+          current.sortOrder !== category.sortOrder ||
+          !current.isDefault
+        ) {
+          await ctx.db.patch(current._id, {
+            kind: category.kind,
+            sortOrder: category.sortOrder,
+            isDefault: true,
+          });
+        }
+
+        continue;
+      }
+
       await ctx.db.insert("categories", {
         name: category.name,
         kind: category.kind,
         sortOrder: category.sortOrder,
         isDefault: true,
       });
+      inserted += 1;
     }
 
     return {
-      inserted: defaultCategories.length,
-      skipped: false,
+      inserted,
+      skipped: inserted === 0,
     };
   },
 });

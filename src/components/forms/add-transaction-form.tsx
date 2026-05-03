@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { type Id } from "../../../convex/_generated/dataModel";
 import { api } from "../../../convex/_generated/api";
@@ -13,6 +13,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
+import {
+  getCategoriesForTransactionType,
+  isValidCategoryForTransactionType,
+  resolveCategoryForTransactionType,
+  type CategoryName,
+} from "@/lib/categories";
 import { getMonthKey } from "@/lib/dates";
 import {
   addTransactionSchema,
@@ -25,45 +31,46 @@ import { cn } from "@/lib/utils";
 type TransactionType = AddTransactionInput["type"];
 type FormErrors = Partial<Record<keyof AddTransactionInput, string>>;
 
-const initialDate = getTodayInputValue();
-
 export function AddTransactionForm() {
   const categories = useQuery(api.categories.list, {});
   const createTransaction = useMutation(api.transactions.create);
+  const amountInputRef = useRef<HTMLInputElement>(null);
 
   const [amount, setAmount] = useState("");
   const [type, setType] = useState<TransactionType>("expense");
   const [categoryId, setCategoryId] = useState("");
-  const [date, setDate] = useState(initialDate);
+  const [date, setDate] = useState(() => getTodayInputValue());
   const [note, setNote] = useState("");
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSaving, setIsSaving] = useState(false);
 
-  const incomeCategory = useMemo(
-    () => categories?.find((category) => category.name === "Income"),
+  const categoryByName = useMemo(
+    () => new Map(categories?.map((category) => [category.name, category]) ?? []),
     [categories],
   );
 
-  const expenseCategories = useMemo(
-    () => categories?.filter((category) => category.name !== "Income") ?? [],
-    [categories],
-  );
+  const visibleCategoryNames = getCategoriesForTransactionType(type);
+  const visibleCategories = visibleCategoryNames
+    .map((categoryName) => categoryByName.get(categoryName))
+    .filter((category) => category !== undefined);
 
-  const visibleCategories =
-    type === "income" ? (incomeCategory ? [incomeCategory] : []) : expenseCategories;
+  const defaultExpenseCategoryId = categoryByName.get("Other" satisfies CategoryName)?._id ?? "";
+  const effectiveCategoryId = categoryId || (type === "expense" ? defaultExpenseCategoryId : "");
+  const selectedCategory = categories?.find((category) => category._id === effectiveCategoryId);
+  const selectedCategoryId = selectedCategory?._id ?? "";
 
-  const selectedCategoryId =
-    type === "income"
-      ? (incomeCategory?._id ?? "")
-      : expenseCategories.some((category) => category._id === categoryId)
-        ? categoryId
-        : (expenseCategories[0]?._id ?? "");
+  useEffect(() => {
+    amountInputRef.current?.focus();
+  }, []);
 
   function updateType(nextType: TransactionType) {
-    setType(nextType);
-    setCategoryId(
-      nextType === "income" ? (incomeCategory?._id ?? "") : (expenseCategories[0]?._id ?? ""),
+    const nextCategoryName = resolveCategoryForTransactionType(
+      nextType,
+      categories?.find((category) => category._id === categoryId)?.name,
     );
+
+    setType(nextType);
+    setCategoryId(categoryByName.get(nextCategoryName)?._id ?? "");
     setErrors((current) => ({ ...current, type: undefined, categoryId: undefined }));
   }
 
@@ -93,9 +100,9 @@ export function AddTransactionForm() {
       note,
     });
 
-    if (!parsed.success) {
-      const nextErrors: FormErrors = {};
+    const nextErrors: FormErrors = {};
 
+    if (!parsed.success) {
       for (const issue of parsed.error.issues) {
         const field = issue.path[0] as keyof AddTransactionInput | undefined;
 
@@ -103,7 +110,19 @@ export function AddTransactionForm() {
           nextErrors[field] = issue.message;
         }
       }
+    }
 
+    if (
+      selectedCategory &&
+      !isValidCategoryForTransactionType(type, selectedCategory.name)
+    ) {
+      nextErrors.categoryId =
+        type === "income"
+          ? "Income must use Income category."
+          : "Expense cannot use Income category.";
+    }
+
+    if (Object.keys(nextErrors).length > 0 || !parsed.success) {
       setErrors(nextErrors);
       return;
     }
@@ -127,10 +146,10 @@ export function AddTransactionForm() {
         monthKey: getMonthKey(new Date(occurredAt)),
       });
 
-      toast.success(parsed.data.type === "income" ? "Income added." : "Expense added.");
+      toast.success("Transaction added");
       setAmount("");
       setType("expense");
-      setCategoryId(expenseCategories[0]?._id ?? "");
+      setCategoryId(categoryByName.get("Other" satisfies CategoryName)?._id ?? "");
       setDate(getTodayInputValue());
       setNote("");
       setErrors({});
@@ -160,6 +179,28 @@ export function AddTransactionForm() {
       <form onSubmit={handleSubmit} className="mt-6 flex min-w-0 flex-1 flex-col gap-5">
         <Card className="border-emerald-100 bg-white shadow-sm">
           <CardContent className="space-y-5">
+            <div className="space-y-2">
+              <Label htmlFor="amount">Amount</Label>
+              <Input
+                id="amount"
+                ref={amountInputRef}
+                autoFocus
+                inputMode="decimal"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="0.00"
+                value={amount}
+                onChange={(event) => updateAmount(event.target.value)}
+                disabled={isSaving}
+                aria-invalid={Boolean(errors.amount)}
+                className="h-16 rounded-xl border-emerald-100 bg-emerald-50/60 px-4 text-3xl font-semibold text-emerald-950 shadow-inner placeholder:text-emerald-900/30 focus-visible:border-emerald-600 focus-visible:ring-emerald-600/20 md:text-3xl"
+              />
+              {errors.amount ? (
+                <p className="text-sm font-medium text-red-600">{errors.amount}</p>
+              ) : null}
+            </div>
+
             <div className="grid grid-cols-2 gap-2 rounded-xl bg-emerald-50 p-1">
               <Button
                 type="button"
@@ -194,26 +235,6 @@ export function AddTransactionForm() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="amount">Amount</Label>
-              <Input
-                id="amount"
-                inputMode="decimal"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="0.00"
-                value={amount}
-                onChange={(event) => updateAmount(event.target.value)}
-                disabled={isSaving}
-                aria-invalid={Boolean(errors.amount)}
-                className="h-16 rounded-xl border-emerald-100 bg-emerald-50/60 px-4 text-3xl font-semibold text-emerald-950 shadow-inner placeholder:text-emerald-900/30 focus-visible:border-emerald-600 focus-visible:ring-emerald-600/20 md:text-3xl"
-              />
-              {errors.amount ? (
-                <p className="text-sm font-medium text-red-600">{errors.amount}</p>
-              ) : null}
-            </div>
-
-            <div className="space-y-2">
               <Label>Category</Label>
               {visibleCategories.length > 0 ? (
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -229,7 +250,7 @@ export function AddTransactionForm() {
                           : "border-emerald-100 bg-white text-zinc-800 hover:bg-emerald-50",
                       )}
                       onClick={() => updateCategory(category._id)}
-                      disabled={isSaving || type === "income"}
+                      disabled={isSaving}
                     >
                       <span className="min-w-0 truncate">{category.name}</span>
                     </Button>
