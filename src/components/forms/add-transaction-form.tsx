@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { type Id } from "../../../convex/_generated/dataModel";
-import { api } from "../../../convex/_generated/api";
+import { api } from "@convex/_generated/api";
+import { type Id } from "@convex/_generated/dataModel";
 import { ArrowDownCircle, ArrowUpCircle, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 

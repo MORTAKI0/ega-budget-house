@@ -4,7 +4,7 @@ import { Component, type ReactNode, useState } from "react";
 import { useQuery } from "convex/react";
 import { ArrowDownCircle, ArrowUpCircle, CalendarDays, Loader2 } from "lucide-react";
 
-import { api } from "../../../convex/_generated/api";
+import { api } from "@convex/_generated/api";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
