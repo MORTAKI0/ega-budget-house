@@ -1,0 +1,716 @@
+diff --git a/convex/categories.ts b/convex/categories.ts
+index 45255ae..97fa74c 100644
+--- a/convex/categories.ts
++++ b/convex/categories.ts
+@@ -1,15 +1,5 @@
+ import { mutation, query } from "./_generated/server";
+-
+-const defaultCategories = [
+-  { name: "Transport", kind: "expense", sortOrder: 1 },
+-  { name: "WiFi", kind: "expense", sortOrder: 2 },
+-  { name: "Abonnement", kind: "expense", sortOrder: 3 },
+-  { name: "Home Stuff", kind: "expense", sortOrder: 4 },
+-  { name: "Coffee Outside", kind: "expense", sortOrder: 5 },
+-  { name: "Food", kind: "expense", sortOrder: 6 },
+-  { name: "Income", kind: "income", sortOrder: 7 },
+-  { name: "Other", kind: "expense", sortOrder: 8 },
+-] as const;
++import { DEFAULT_CATEGORY_DEFINITIONS } from "./categoryRules";
+ 
+ export const list = query({
+   args: {},
+@@ -22,26 +12,40 @@ export const seedDefaults = mutation({
+   args: {},
+   handler: async (ctx) => {
+     const existing = await ctx.db.query("categories").collect();
++    const existingByName = new Map(existing.map((category) => [category.name, category]));
++    let inserted = 0;
+ 
+-    if (existing.length > 0) {
+-      return {
+-        inserted: 0,
+-        skipped: true,
+-      };
+-    }
++    for (const category of DEFAULT_CATEGORY_DEFINITIONS) {
++      const current = existingByName.get(category.name);
++
++      if (current) {
++        if (
++          current.kind !== category.kind ||
++          current.sortOrder !== category.sortOrder ||
++          !current.isDefault
++        ) {
++          await ctx.db.patch(current._id, {
++            kind: category.kind,
++            sortOrder: category.sortOrder,
++            isDefault: true,
++          });
++        }
++
++        continue;
++      }
+ 
+-    for (const category of defaultCategories) {
+       await ctx.db.insert("categories", {
+         name: category.name,
+         kind: category.kind,
+         sortOrder: category.sortOrder,
+         isDefault: true,
+       });
++      inserted += 1;
+     }
+ 
+     return {
+-      inserted: defaultCategories.length,
+-      skipped: false,
++      inserted,
++      skipped: inserted === 0,
+     };
+   },
+ });
+diff --git a/convex/monthlySettings.ts b/convex/monthlySettings.ts
+index 10732d5..21f76dc 100644
+--- a/convex/monthlySettings.ts
++++ b/convex/monthlySettings.ts
+@@ -1,14 +1,46 @@
+ import { mutation, query } from "./_generated/server";
++import { getAuthUserId } from "@convex-dev/auth/server";
+ import { v } from "convex/values";
+ 
++const monthKeyPattern = /^\d{4}-\d{2}$/;
++
++function validateSettingsInput(args: {
++  monthKey: string;
++  startingBalance: number;
++  safeBalanceGoal: number;
++  currency: string;
++}) {
++  if (!monthKeyPattern.test(args.monthKey)) {
++    throw new Error("Month must use YYYY-MM format.");
++  }
++
++  if (!Number.isFinite(args.startingBalance)) {
++    throw new Error("Starting balance must be a valid number.");
++  }
++
++  if (!Number.isFinite(args.safeBalanceGoal)) {
++    throw new Error("Safe balance goal must be a valid number.");
++  }
++
++  if (!args.currency.trim()) {
++    throw new Error("Currency is required.");
++  }
++}
++
+ export const get = query({
+   args: {
+     monthKey: v.string(),
+   },
+   handler: async (ctx, args) => {
++    const userId = await getAuthUserId(ctx);
++
++    if (!userId) {
++      return null;
++    }
++
+     return await ctx.db
+       .query("monthlySettings")
+-      .withIndex("by_monthKey", (q) => q.eq("monthKey", args.monthKey))
++      .withIndex("by_user_month", (q) => q.eq("userId", userId).eq("monthKey", args.monthKey))
+       .unique();
+   },
+ });
+@@ -21,9 +53,19 @@ export const upsert = mutation({
+     currency: v.string(),
+   },
+   handler: async (ctx, args) => {
++    validateSettingsInput(args);
++
++    const userId = await getAuthUserId(ctx);
++
++    if (!userId) {
++      throw new Error("Sign in to save monthly settings.");
++    }
++
++    const currency = args.currency.trim().toUpperCase();
++
+     const existing = await ctx.db
+       .query("monthlySettings")
+-      .withIndex("by_monthKey", (q) => q.eq("monthKey", args.monthKey))
++      .withIndex("by_user_month", (q) => q.eq("userId", userId).eq("monthKey", args.monthKey))
+       .unique();
+ 
+     const now = Date.now();
+@@ -32,7 +74,7 @@ export const upsert = mutation({
+       await ctx.db.patch(existing._id, {
+         startingBalance: args.startingBalance,
+         safeBalanceGoal: args.safeBalanceGoal,
+-        currency: args.currency,
++        currency,
+         updatedAt: now,
+       });
+ 
+@@ -40,10 +82,11 @@ export const upsert = mutation({
+     }
+ 
+     return await ctx.db.insert("monthlySettings", {
++      userId,
+       monthKey: args.monthKey,
+       startingBalance: args.startingBalance,
+       safeBalanceGoal: args.safeBalanceGoal,
+-      currency: args.currency,
++      currency,
+       createdAt: now,
+       updatedAt: now,
+     });
+diff --git a/convex/monthlySummary.ts b/convex/monthlySummary.ts
+index 8a7cd6e..3376699 100644
+--- a/convex/monthlySummary.ts
++++ b/convex/monthlySummary.ts
+@@ -1,71 +1,113 @@
+ import { query } from "./_generated/server";
+ import { v } from "convex/values";
++import { getAuthUserId } from "@convex-dev/auth/server";
++import { CATEGORY_ORDER, INCOME_CATEGORY } from "./categoryRules";
+ 
+ export const get = query({
+   args: {
+     monthKey: v.string(),
+   },
+   handler: async (ctx, args) => {
++    const userId = await getAuthUserId(ctx);
+     const transactions = await ctx.db
+       .query("transactions")
+-      .withIndex("by_monthKey", (q) => q.eq("monthKey", args.monthKey))
++      .withIndex("by_monthKey_occurredAt", (q) => q.eq("monthKey", args.monthKey))
++      .order("desc")
+       .collect();
+ 
+-    const settings = await ctx.db
+-      .query("monthlySettings")
+-      .withIndex("by_monthKey", (q) => q.eq("monthKey", args.monthKey))
+-      .unique();
++    const settings = userId
++      ? await ctx.db
++          .query("monthlySettings")
++          .withIndex("by_user_month", (q) => q.eq("userId", userId).eq("monthKey", args.monthKey))
++          .unique()
++      : null;
+ 
+     const categories = await ctx.db.query("categories").collect();
+     const categoryById = new Map(categories.map((category) => [category._id, category]));
++    const selectedTransactions = transactions.filter(
++      (transaction) => transaction.monthKey === args.monthKey,
++    );
+ 
+-    const monthlyIncome = transactions
++    const totalIncome = selectedTransactions
+       .filter((transaction) => transaction.type === "income")
+       .reduce((sum, transaction) => sum + transaction.amount, 0);
+ 
+-    const monthlyExpenses = transactions
++    const totalExpenses = selectedTransactions
+       .filter((transaction) => transaction.type === "expense")
+       .reduce((sum, transaction) => sum + transaction.amount, 0);
+ 
+     const startingBalance = settings?.startingBalance ?? 0;
+     const safeBalanceGoal = settings?.safeBalanceGoal ?? 0;
+-    const currentBalance = startingBalance + monthlyIncome - monthlyExpenses;
++    const netChange = totalIncome - totalExpenses;
++    const currentBalance = startingBalance + netChange;
+     const availableToSpend = currentBalance - safeBalanceGoal;
++    const categoryRank = new Map<string, number>(
++      CATEGORY_ORDER.map((category, index) => [category, index]),
++    );
++    const categoryTotalsByName = new Map<string, number>();
+ 
+-    const categoryTotals = new Map<string, number>();
+-
+-    for (const transaction of transactions) {
++    for (const transaction of selectedTransactions) {
+       if (transaction.type !== "expense") continue;
+ 
+       const category = categoryById.get(transaction.categoryId);
+-      const categoryName = category?.name ?? "Unknown";
++      const categoryName = category?.name ?? "Other";
++
++      if (categoryName === INCOME_CATEGORY) continue;
+ 
+-      categoryTotals.set(
++      categoryTotalsByName.set(
+         categoryName,
+-        (categoryTotals.get(categoryName) ?? 0) + transaction.amount,
++        (categoryTotalsByName.get(categoryName) ?? 0) + transaction.amount,
+       );
+     }
+ 
+-    const topCategories = Array.from(categoryTotals.entries())
+-      .map(([categoryName, total]) => ({ categoryName, total }))
+-      .sort((a, b) => b.total - a.total)
+-      .slice(0, 3);
++    const categoryTotals = Array.from(categoryTotalsByName.entries())
++      .map(([category, total]) => ({ category, total }))
++      .sort((a, b) => {
++        if (b.total !== a.total) {
++          return b.total - a.total;
++        }
+ 
+-    const biggestExpense = transactions
++        return (
++          (categoryRank.get(a.category) ?? Number.MAX_SAFE_INTEGER) -
++          (categoryRank.get(b.category) ?? Number.MAX_SAFE_INTEGER)
++        );
++      });
++
++    const largestExpense = selectedTransactions
+       .filter((transaction) => transaction.type === "expense")
+-      .sort((a, b) => b.amount - a.amount)[0];
++      .sort((a, b) => {
++        if (b.amount !== a.amount) {
++          return b.amount - a.amount;
++        }
++
++        if (b.occurredAt !== a.occurredAt) {
++          return b.occurredAt - a.occurredAt;
++        }
++
++        return String(a._id).localeCompare(String(b._id));
++      })[0];
+ 
+     return {
+       monthKey: args.monthKey,
+-      monthlyIncome,
+-      monthlyExpenses,
+-      netChange: monthlyIncome - monthlyExpenses,
++      totalIncome,
++      totalExpenses,
++      netChange,
+       startingBalance,
+-      safeBalanceGoal,
+       currentBalance,
++      safeBalanceGoal,
+       availableToSpend,
+-      topCategories,
+-      biggestExpense,
++      currency: settings?.currency ?? "MAD",
++      categoryTotals,
++      topCategories: categoryTotals.slice(0, 3),
++      largestExpense: largestExpense
++        ? {
++            id: largestExpense._id,
++            amount: largestExpense.amount,
++            category: categoryById.get(largestExpense.categoryId)?.name ?? "Other",
++            occurredAt: new Date(largestExpense.occurredAt).toISOString(),
++            ...(largestExpense.note ? { note: largestExpense.note } : {}),
++          }
++        : null,
+     };
+   },
+ });
+diff --git a/convex/schema.ts b/convex/schema.ts
+index ed30623..8e04703 100644
+--- a/convex/schema.ts
++++ b/convex/schema.ts
+@@ -27,11 +27,14 @@ export default defineSchema({
+     .index("by_monthKey_occurredAt", ["monthKey", "occurredAt"]),
+ 
+   monthlySettings: defineTable({
++    userId: v.optional(v.id("users")),
+     monthKey: v.string(),
+     startingBalance: v.number(),
+     safeBalanceGoal: v.number(),
+     currency: v.string(),
+     createdAt: v.number(),
+     updatedAt: v.number(),
+-  }).index("by_monthKey", ["monthKey"]),
++  })
++    .index("by_monthKey", ["monthKey"])
++    .index("by_user_month", ["userId", "monthKey"]),
+ });
+diff --git a/convex/transactions.ts b/convex/transactions.ts
+index d7ff1c3..9cbdc51 100644
+--- a/convex/transactions.ts
++++ b/convex/transactions.ts
+@@ -1,16 +1,34 @@
+ import { mutation, query } from "./_generated/server";
+ import { v } from "convex/values";
++import { getResolvedCategoryId } from "./categoryRules";
+ 
+ export const listByMonth = query({
+   args: {
+     monthKey: v.string(),
+   },
+   handler: async (ctx, args) => {
+-    return await ctx.db
++    const transactions = await ctx.db
+       .query("transactions")
+       .withIndex("by_monthKey_occurredAt", (q) => q.eq("monthKey", args.monthKey))
+       .order("desc")
+       .collect();
++
++    return await Promise.all(
++      transactions.map(async (transaction) => {
++        const category = await ctx.db.get(transaction.categoryId);
++
++        return {
++          ...transaction,
++          category: category
++            ? {
++                _id: category._id,
++                name: category.name,
++                kind: category.kind,
++              }
++            : null,
++        };
++      }),
++    );
+   },
+ });
+ 
+@@ -29,11 +47,12 @@ export const create = mutation({
+     }
+ 
+     const now = Date.now();
++    const categoryId = await getResolvedCategoryId(ctx, args.type, args.categoryId);
+ 
+     return await ctx.db.insert("transactions", {
+       amount: args.amount,
+       type: args.type,
+-      categoryId: args.categoryId,
++      categoryId,
+       note: args.note,
+       occurredAt: args.occurredAt,
+       monthKey: args.monthKey,
+@@ -55,13 +74,26 @@ export const update = mutation({
+   },
+   handler: async (ctx, args) => {
+     const { id, ...patch } = args;
++    const transaction = await ctx.db.get(id);
++
++    if (!transaction) {
++      throw new Error("Transaction not found.");
++    }
+ 
+     if (patch.amount !== undefined && patch.amount <= 0) {
+       throw new Error("Amount must be greater than zero.");
+     }
+ 
++    const type = patch.type ?? transaction.type;
++    const categoryId = await getResolvedCategoryId(
++      ctx,
++      type,
++      patch.categoryId ?? transaction.categoryId,
++    );
++
+     await ctx.db.patch(id, {
+       ...patch,
++      categoryId,
+       updatedAt: Date.now(),
+     });
+ 
+diff --git a/src/app/settings/page.tsx b/src/app/settings/page.tsx
+index 5c972cc..00d1126 100644
+--- a/src/app/settings/page.tsx
++++ b/src/app/settings/page.tsx
+@@ -1,11 +1,13 @@
+ import { AppShell } from "@/components/app-shell/app-shell";
+ import { LogoutButton } from "@/components/app-shell/logout-button";
+ import { PageHeader } from "@/components/app-shell/page-header";
++import { MonthlySettingsForm } from "@/components/settings/monthly-settings-form";
+ 
+ export default function SettingsPage() {
+   return (
+     <AppShell>
+-      <PageHeader title="Settings" description="Budget settings placeholder." />
++      <PageHeader title="Settings" description="Set safe balance rules for each month." />
++      <MonthlySettingsForm />
+       <LogoutButton />
+     </AppShell>
+   );
+diff --git a/src/components/forms/add-transaction-form.tsx b/src/components/forms/add-transaction-form.tsx
+index f530c57..101ce95 100644
+--- a/src/components/forms/add-transaction-form.tsx
++++ b/src/components/forms/add-transaction-form.tsx
+@@ -1,6 +1,6 @@
+ "use client";
+ 
+-import { useMemo, useState } from "react";
++import { useEffect, useMemo, useRef, useState } from "react";
+ import { useMutation, useQuery } from "convex/react";
+ import { type Id } from "../../../convex/_generated/dataModel";
+ import { api } from "../../../convex/_generated/api";
+@@ -13,6 +13,12 @@ import { Input } from "@/components/ui/input";
+ import { Label } from "@/components/ui/label";
+ import { Textarea } from "@/components/ui/textarea";
+ import { Toaster } from "@/components/ui/sonner";
++import {
++  getCategoriesForTransactionType,
++  isValidCategoryForTransactionType,
++  resolveCategoryForTransactionType,
++  type CategoryName,
++} from "@/lib/categories";
+ import { getMonthKey } from "@/lib/dates";
+ import {
+   addTransactionSchema,
+@@ -25,45 +31,46 @@ import { cn } from "@/lib/utils";
+ type TransactionType = AddTransactionInput["type"];
+ type FormErrors = Partial<Record<keyof AddTransactionInput, string>>;
+ 
+-const initialDate = getTodayInputValue();
+-
+ export function AddTransactionForm() {
+   const categories = useQuery(api.categories.list, {});
+   const createTransaction = useMutation(api.transactions.create);
++  const amountInputRef = useRef<HTMLInputElement>(null);
+ 
+   const [amount, setAmount] = useState("");
+   const [type, setType] = useState<TransactionType>("expense");
+   const [categoryId, setCategoryId] = useState("");
+-  const [date, setDate] = useState(initialDate);
++  const [date, setDate] = useState(() => getTodayInputValue());
+   const [note, setNote] = useState("");
+   const [errors, setErrors] = useState<FormErrors>({});
+   const [isSaving, setIsSaving] = useState(false);
+ 
+-  const incomeCategory = useMemo(
+-    () => categories?.find((category) => category.name === "Income"),
++  const categoryByName = useMemo(
++    () => new Map(categories?.map((category) => [category.name, category]) ?? []),
+     [categories],
+   );
+ 
+-  const expenseCategories = useMemo(
+-    () => categories?.filter((category) => category.name !== "Income") ?? [],
+-    [categories],
+-  );
++  const visibleCategoryNames = getCategoriesForTransactionType(type);
++  const visibleCategories = visibleCategoryNames
++    .map((categoryName) => categoryByName.get(categoryName))
++    .filter((category) => category !== undefined);
+ 
+-  const visibleCategories =
+-    type === "income" ? (incomeCategory ? [incomeCategory] : []) : expenseCategories;
++  const defaultExpenseCategoryId = categoryByName.get("Other" satisfies CategoryName)?._id ?? "";
++  const effectiveCategoryId = categoryId || (type === "expense" ? defaultExpenseCategoryId : "");
++  const selectedCategory = categories?.find((category) => category._id === effectiveCategoryId);
++  const selectedCategoryId = selectedCategory?._id ?? "";
+ 
+-  const selectedCategoryId =
+-    type === "income"
+-      ? (incomeCategory?._id ?? "")
+-      : expenseCategories.some((category) => category._id === categoryId)
+-        ? categoryId
+-        : (expenseCategories[0]?._id ?? "");
++  useEffect(() => {
++    amountInputRef.current?.focus();
++  }, []);
+ 
+   function updateType(nextType: TransactionType) {
+-    setType(nextType);
+-    setCategoryId(
+-      nextType === "income" ? (incomeCategory?._id ?? "") : (expenseCategories[0]?._id ?? ""),
++    const nextCategoryName = resolveCategoryForTransactionType(
++      nextType,
++      categories?.find((category) => category._id === categoryId)?.name,
+     );
++
++    setType(nextType);
++    setCategoryId(categoryByName.get(nextCategoryName)?._id ?? "");
+     setErrors((current) => ({ ...current, type: undefined, categoryId: undefined }));
+   }
+ 
+@@ -93,9 +100,9 @@ export function AddTransactionForm() {
+       note,
+     });
+ 
+-    if (!parsed.success) {
+-      const nextErrors: FormErrors = {};
++    const nextErrors: FormErrors = {};
+ 
++    if (!parsed.success) {
+       for (const issue of parsed.error.issues) {
+         const field = issue.path[0] as keyof AddTransactionInput | undefined;
+ 
+@@ -103,7 +110,19 @@ export function AddTransactionForm() {
+           nextErrors[field] = issue.message;
+         }
+       }
++    }
+ 
++    if (
++      selectedCategory &&
++      !isValidCategoryForTransactionType(type, selectedCategory.name)
++    ) {
++      nextErrors.categoryId =
++        type === "income"
++          ? "Income must use Income category."
++          : "Expense cannot use Income category.";
++    }
++
++    if (Object.keys(nextErrors).length > 0 || !parsed.success) {
+       setErrors(nextErrors);
+       return;
+     }
+@@ -127,10 +146,10 @@ export function AddTransactionForm() {
+         monthKey: getMonthKey(new Date(occurredAt)),
+       });
+ 
+-      toast.success(parsed.data.type === "income" ? "Income added." : "Expense added.");
++      toast.success("Transaction added");
+       setAmount("");
+       setType("expense");
+-      setCategoryId(expenseCategories[0]?._id ?? "");
++      setCategoryId(categoryByName.get("Other" satisfies CategoryName)?._id ?? "");
+       setDate(getTodayInputValue());
+       setNote("");
+       setErrors({});
+@@ -160,6 +179,28 @@ export function AddTransactionForm() {
+       <form onSubmit={handleSubmit} className="mt-6 flex min-w-0 flex-1 flex-col gap-5">
+         <Card className="border-emerald-100 bg-white shadow-sm">
+           <CardContent className="space-y-5">
++            <div className="space-y-2">
++              <Label htmlFor="amount">Amount</Label>
++              <Input
++                id="amount"
++                ref={amountInputRef}
++                autoFocus
++                inputMode="decimal"
++                type="number"
++                min="0"
++                step="0.01"
++                placeholder="0.00"
++                value={amount}
++                onChange={(event) => updateAmount(event.target.value)}
++                disabled={isSaving}
++                aria-invalid={Boolean(errors.amount)}
++                className="h-16 rounded-xl border-emerald-100 bg-emerald-50/60 px-4 text-3xl font-semibold text-emerald-950 shadow-inner placeholder:text-emerald-900/30 focus-visible:border-emerald-600 focus-visible:ring-emerald-600/20 md:text-3xl"
++              />
++              {errors.amount ? (
++                <p className="text-sm font-medium text-red-600">{errors.amount}</p>
++              ) : null}
++            </div>
++
+             <div className="grid grid-cols-2 gap-2 rounded-xl bg-emerald-50 p-1">
+               <Button
+                 type="button"
+@@ -193,26 +234,6 @@ export function AddTransactionForm() {
+               </Button>
+             </div>
+ 
+-            <div className="space-y-2">
+-              <Label htmlFor="amount">Amount</Label>
+-              <Input
+-                id="amount"
+-                inputMode="decimal"
+-                type="number"
+-                min="0"
+-                step="0.01"
+-                placeholder="0.00"
+-                value={amount}
+-                onChange={(event) => updateAmount(event.target.value)}
+-                disabled={isSaving}
+-                aria-invalid={Boolean(errors.amount)}
+-                className="h-16 rounded-xl border-emerald-100 bg-emerald-50/60 px-4 text-3xl font-semibold text-emerald-950 shadow-inner placeholder:text-emerald-900/30 focus-visible:border-emerald-600 focus-visible:ring-emerald-600/20 md:text-3xl"
+-              />
+-              {errors.amount ? (
+-                <p className="text-sm font-medium text-red-600">{errors.amount}</p>
+-              ) : null}
+-            </div>
+-
+             <div className="space-y-2">
+               <Label>Category</Label>
+               {visibleCategories.length > 0 ? (
+@@ -229,7 +250,7 @@ export function AddTransactionForm() {
+                           : "border-emerald-100 bg-white text-zinc-800 hover:bg-emerald-50",
+                       )}
+                       onClick={() => updateCategory(category._id)}
+-                      disabled={isSaving || type === "income"}
++                      disabled={isSaving}
+                     >
+                       <span className="min-w-0 truncate">{category.name}</span>
+                     </Button>
+diff --git a/src/lib/categories.ts b/src/lib/categories.ts
+index 5615261..998d737 100644
+--- a/src/lib/categories.ts
++++ b/src/lib/categories.ts
+@@ -1,4 +1,6 @@
+-export const defaultCategories = [
++import { type TransactionType } from "@/lib/transactions";
++
++export const CATEGORY_ORDER = [
+   "Transport",
+   "WiFi",
+   "Abonnement",
+@@ -9,9 +11,11 @@ export const defaultCategories = [
+   "Other",
+ ] as const;
+ 
+-export type DefaultCategoryName = (typeof defaultCategories)[number];
++export type CategoryName = (typeof CATEGORY_ORDER)[number];
++
++export const INCOME_CATEGORY = "Income" satisfies CategoryName;
+ 
+-export const expenseCategories: Exclude<DefaultCategoryName, "Income">[] = [
++export const EXPENSE_CATEGORIES = [
+   "Transport",
+   "WiFi",
+   "Abonnement",
+@@ -19,4 +23,34 @@ export const expenseCategories: Exclude<DefaultCategoryName, "Income">[] = [
+   "Coffee Outside",
+   "Food",
+   "Other",
+-];
++] as const satisfies readonly Exclude<CategoryName, typeof INCOME_CATEGORY>[];
++
++export const defaultCategories = CATEGORY_ORDER;
++export type DefaultCategoryName = CategoryName;
++export const expenseCategories = EXPENSE_CATEGORIES;
++
++export function getCategoriesForTransactionType(type: TransactionType): readonly CategoryName[] {
++  return type === "income" ? [INCOME_CATEGORY] : EXPENSE_CATEGORIES;
++}
++
++export function resolveCategoryForTransactionType(
++  type: TransactionType,
++  categoryName: string | undefined,
++): CategoryName {
++  if (isValidCategoryForTransactionType(type, categoryName)) {
++    return categoryName;
++  }
++
++  return type === "income" ? INCOME_CATEGORY : "Other";
++}
++
++export function isValidCategoryForTransactionType(
++  type: TransactionType,
++  categoryName: string | undefined,
++): categoryName is CategoryName {
++  if (!categoryName) {
++    return false;
++  }
++
++  return getCategoriesForTransactionType(type).includes(categoryName as CategoryName);
++}
+diff --git a/src/lib/currency.ts b/src/lib/currency.ts
+index d10a349..7169bb4 100644
+--- a/src/lib/currency.ts
++++ b/src/lib/currency.ts
+@@ -1,4 +1,4 @@
+-export const DEFAULT_CURRENCY = "USD";
++export const DEFAULT_CURRENCY = "MAD";
+ 
+ export function formatCurrency(amount: number, currency = DEFAULT_CURRENCY): string {
+   return new Intl.NumberFormat("en-US", {
+diff --git a/src/lib/transactions.ts b/src/lib/transactions.ts
+index 9fb357f..cf48391 100644
+--- a/src/lib/transactions.ts
++++ b/src/lib/transactions.ts
+@@ -1,6 +1,7 @@
+ import { z } from "zod";
+ 
+ export const transactionTypeSchema = z.enum(["expense", "income"]);
++export type TransactionType = z.infer<typeof transactionTypeSchema>;
+ 
+ export const addTransactionSchema = z.object({
+   amount: z.coerce.number().positive("Amount must be greater than 0."),

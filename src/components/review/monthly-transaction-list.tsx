@@ -9,6 +9,9 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CategoryStatistics } from "@/components/review/category-statistics";
+import { MonthlySummaryCards } from "@/components/review/monthly-summary-cards";
+import { SafeBalanceStatus } from "@/components/review/safe-balance-status";
 import { formatCurrency } from "@/lib/currency";
 import { formatDisplayDate, formatMonthLabel, getMonthKey } from "@/lib/dates";
 import { groupTransactionsByDay } from "@/lib/review-transactions";
@@ -55,6 +58,12 @@ export function MonthlyTransactionList() {
 
 function MonthlyTransactionListContent() {
   const [selectedMonth, setSelectedMonth] = useState(() => getMonthKey());
+  const summary = useQuery(api.monthlySummary.get, {
+    monthKey: selectedMonth,
+  });
+  const settings = useQuery(api.monthlySettings.get, {
+    monthKey: selectedMonth,
+  });
   const transactions = useQuery(api.transactions.listByMonth, {
     monthKey: selectedMonth,
   });
@@ -76,6 +85,17 @@ function MonthlyTransactionListContent() {
           </div>
         </CardContent>
       </Card>
+
+      <MonthlySummaryCards summary={summary} isLoading={summary === undefined} />
+
+      <SafeBalanceStatus
+        summary={summary}
+        hasSettings={settings !== null}
+        monthKey={selectedMonth}
+        isLoading={summary === undefined || settings === undefined}
+      />
+
+      <CategoryStatistics summary={summary} isLoading={summary === undefined} />
 
       <div className="space-y-3">
         <div className="flex min-w-0 items-center justify-between gap-3">

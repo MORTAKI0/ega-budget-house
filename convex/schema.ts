@@ -27,11 +27,14 @@ export default defineSchema({
     .index("by_monthKey_occurredAt", ["monthKey", "occurredAt"]),
 
   monthlySettings: defineTable({
+    userId: v.optional(v.id("users")),
     monthKey: v.string(),
     startingBalance: v.number(),
     safeBalanceGoal: v.number(),
     currency: v.string(),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_monthKey", ["monthKey"]),
+  })
+    .index("by_monthKey", ["monthKey"])
+    .index("by_user_month", ["userId", "monthKey"]),
 });
