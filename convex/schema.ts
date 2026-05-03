@@ -4,11 +4,7 @@ import { v } from "convex/values";
 export default defineSchema({
   categories: defineTable({
     name: v.string(),
-    kind: v.union(
-      v.literal("expense"),
-      v.literal("income"),
-      v.literal("both"),
-    ),
+    kind: v.union(v.literal("expense"), v.literal("income"), v.literal("both")),
     sortOrder: v.number(),
     isDefault: v.boolean(),
   }).index("by_sortOrder", ["sortOrder"]),
