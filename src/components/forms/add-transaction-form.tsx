@@ -1,312 +1,215 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
-import { api } from "@convex/_generated/api";
-import { type Id } from "@convex/_generated/dataModel";
-import { ArrowDownCircle, ArrowUpCircle, Loader2, Save } from "lucide-react";
-import { toast } from "sonner";
+import { useState } from "react";
+import { CalendarDays, Check, PencilLine } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Toaster } from "@/components/ui/sonner";
-import {
-  getCategoriesForTransactionType,
-  isValidCategoryForTransactionType,
-  resolveCategoryForTransactionType,
-  type CategoryName,
-} from "@/lib/categories";
-import { getMonthKey } from "@/lib/dates";
-import {
-  addTransactionSchema,
-  getDateInputTimestamp,
-  getTodayInputValue,
-  type AddTransactionInput,
-} from "@/lib/transactions";
 import { cn } from "@/lib/utils";
 
-type TransactionType = AddTransactionInput["type"];
-type FormErrors = Partial<Record<keyof AddTransactionInput, string>>;
+type TransactionType = "expense" | "income";
+
+const categories = [
+  { id: "transport", label: "transport", emoji: "🚇" },
+  { id: "wifi", label: "wifi", emoji: "📶" },
+  { id: "subscr", label: "subscr", emoji: "📦" },
+  { id: "home", label: "home", emoji: "🏠" },
+  { id: "coffee", label: "coffee", emoji: "☕" },
+  { id: "food", label: "food", emoji: "🥗" },
+  { id: "other", label: "other", emoji: "✦" },
+];
+
+const TOGGLE_STYLES = {
+  expense: {
+    gradient: "from-rose-500 to-orange-400",
+    glow: "shadow-[0_0_24px_rgba(244,63,94,0.35)]",
+    text: "text-rose-400",
+    border: "border-rose-500/40",
+    ring: "ring-rose-500/20",
+  },
+  income: {
+    gradient: "from-lime-400 to-emerald-500",
+    glow: "shadow-[0_0_24px_rgba(52,211,153,0.35)]",
+    text: "text-emerald-400",
+    border: "border-emerald-500/40",
+    ring: "ring-emerald-500/20",
+  },
+};
 
 export function AddTransactionForm() {
-  const categories = useQuery(api.categories.list, {});
-  const createTransaction = useMutation(api.transactions.create);
-  const amountInputRef = useRef<HTMLInputElement>(null);
-
-  const [amount, setAmount] = useState("");
   const [type, setType] = useState<TransactionType>("expense");
-  const [categoryId, setCategoryId] = useState("");
-  const [date, setDate] = useState(() => getTodayInputValue());
+  const [category, setCategory] = useState("other");
+  const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
-  const [errors, setErrors] = useState<FormErrors>({});
-  const [isSaving, setIsSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
-  const categoryByName = useMemo(
-    () => new Map(categories?.map((category) => [category.name, category]) ?? []),
-    [categories],
-  );
+  const isExpense = type === "expense";
+  const s = TOGGLE_STYLES[type];
+  const amountDisplay = amount || "0.00";
+  const canSave = amount.trim() !== "" && parseFloat(amount) > 0;
 
-  const visibleCategoryNames = getCategoriesForTransactionType(type);
-  const visibleCategories = visibleCategoryNames
-    .map((categoryName) => categoryByName.get(categoryName))
-    .filter((category) => category !== undefined);
-
-  const defaultExpenseCategoryId = categoryByName.get("Other" satisfies CategoryName)?._id ?? "";
-  const effectiveCategoryId = categoryId || (type === "expense" ? defaultExpenseCategoryId : "");
-  const selectedCategory = categories?.find((category) => category._id === effectiveCategoryId);
-  const selectedCategoryId = selectedCategory?._id ?? "";
-
-  useEffect(() => {
-    amountInputRef.current?.focus();
-  }, []);
-
-  function updateType(nextType: TransactionType) {
-    const nextCategoryName = resolveCategoryForTransactionType(
-      nextType,
-      categories?.find((category) => category._id === categoryId)?.name,
-    );
-
-    setType(nextType);
-    setCategoryId(categoryByName.get(nextCategoryName)?._id ?? "");
-    setErrors((current) => ({ ...current, type: undefined, categoryId: undefined }));
-  }
-
-  function updateAmount(nextAmount: string) {
-    setAmount(nextAmount);
-    setErrors((current) => ({ ...current, amount: undefined }));
-  }
-
-  function updateCategory(nextCategoryId: string) {
-    setCategoryId(nextCategoryId);
-    setErrors((current) => ({ ...current, categoryId: undefined }));
-  }
-
-  function updateDate(nextDate: string) {
-    setDate(nextDate);
-    setErrors((current) => ({ ...current, date: undefined }));
-  }
-
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const parsed = addTransactionSchema.safeParse({
-      amount,
-      type,
-      categoryId: selectedCategoryId,
-      date,
-      note,
-    });
-
-    const nextErrors: FormErrors = {};
-
-    if (!parsed.success) {
-      for (const issue of parsed.error.issues) {
-        const field = issue.path[0] as keyof AddTransactionInput | undefined;
-
-        if (field && !nextErrors[field]) {
-          nextErrors[field] = issue.message;
-        }
-      }
-    }
-
-    if (
-      selectedCategory &&
-      !isValidCategoryForTransactionType(type, selectedCategory.name)
-    ) {
-      nextErrors.categoryId =
-        type === "income"
-          ? "Income must use Income category."
-          : "Expense cannot use Income category.";
-    }
-
-    if (Object.keys(nextErrors).length > 0 || !parsed.success) {
-      setErrors(nextErrors);
+  function handleSave() {
+    if (!canSave) {
       return;
     }
 
-    const occurredAt = getDateInputTimestamp(parsed.data.date);
-
-    if (Number.isNaN(occurredAt)) {
-      setErrors((current) => ({ ...current, date: "Choose a valid date." }));
-      return;
-    }
-
-    setIsSaving(true);
-
-    try {
-      await createTransaction({
-        amount: parsed.data.amount,
-        type: parsed.data.type,
-        categoryId: parsed.data.categoryId as Id<"categories">,
-        note: parsed.data.note ? parsed.data.note : undefined,
-        occurredAt,
-        monthKey: getMonthKey(new Date(occurredAt)),
-      });
-
-      toast.success("Transaction added");
-      setAmount("");
-      setType("expense");
-      setCategoryId(categoryByName.get("Other" satisfies CategoryName)?._id ?? "");
-      setDate(getTodayInputValue());
-      setNote("");
-      setErrors({});
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not save transaction.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  if (categories === undefined) {
-    return (
-      <Card className="mt-6 border-emerald-100 shadow-sm">
-        <CardContent className="flex min-h-48 items-center justify-center">
-          <div className="flex items-center gap-2 text-sm font-medium text-emerald-800">
-            <Loader2 className="size-4 animate-spin" />
-            Loading categories
-          </div>
-        </CardContent>
-      </Card>
-    );
+    setSaved(true);
+    window.setTimeout(() => setSaved(false), 2000);
   }
 
   return (
-    <>
-      <Toaster richColors position="top-center" />
-      <form onSubmit={handleSubmit} className="mt-6 flex min-w-0 flex-1 flex-col gap-5">
-        <Card className="border-emerald-100 bg-white shadow-sm">
-          <CardContent className="space-y-5">
-            <div className="space-y-2">
-              <Label htmlFor="amount">Amount</Label>
-              <Input
-                id="amount"
-                ref={amountInputRef}
-                autoFocus
-                inputMode="decimal"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="0.00"
-                value={amount}
-                onChange={(event) => updateAmount(event.target.value)}
-                disabled={isSaving}
-                aria-invalid={Boolean(errors.amount)}
-                className="h-16 rounded-xl border-emerald-100 bg-emerald-50/60 px-4 text-3xl font-semibold text-emerald-950 shadow-inner placeholder:text-emerald-900/30 focus-visible:border-emerald-600 focus-visible:ring-emerald-600/20 md:text-3xl"
-              />
-              {errors.amount ? (
-                <p className="text-sm font-medium text-red-600">{errors.amount}</p>
-              ) : null}
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 rounded-xl bg-emerald-50 p-1">
-              <Button
-                type="button"
-                variant={type === "expense" ? "default" : "ghost"}
-                className={cn(
-                  "h-12 rounded-lg",
-                  type === "expense"
-                    ? "bg-emerald-700 text-white hover:bg-emerald-800"
-                    : "text-emerald-900 hover:bg-white",
-                )}
-                onClick={() => updateType("expense")}
-                disabled={isSaving}
-              >
-                <ArrowDownCircle />
-                Expense
-              </Button>
-              <Button
-                type="button"
-                variant={type === "income" ? "default" : "ghost"}
-                className={cn(
-                  "h-12 rounded-lg",
-                  type === "income"
-                    ? "bg-emerald-700 text-white hover:bg-emerald-800"
-                    : "text-emerald-900 hover:bg-white",
-                )}
-                onClick={() => updateType("income")}
-                disabled={isSaving}
-              >
-                <ArrowUpCircle />
-                Income
-              </Button>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Category</Label>
-              {visibleCategories.length > 0 ? (
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {visibleCategories.map((category) => (
-                    <Button
-                      key={category._id}
-                      type="button"
-                      variant={selectedCategoryId === category._id ? "default" : "outline"}
-                      className={cn(
-                        "h-11 justify-start rounded-xl px-3 text-left",
-                        selectedCategoryId === category._id
-                          ? "bg-emerald-700 text-white hover:bg-emerald-800"
-                          : "border-emerald-100 bg-white text-zinc-800 hover:bg-emerald-50",
-                      )}
-                      onClick={() => updateCategory(category._id)}
-                      disabled={isSaving}
-                    >
-                      <span className="min-w-0 truncate">{category.name}</span>
-                    </Button>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-xl border border-dashed border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                  No matching categories found.
-                </div>
+    <section className="mx-auto mt-6 flex w-full max-w-[420px] min-w-0 flex-col rounded-[2rem] border border-zinc-900/90 bg-[#0a0a0f] pb-5 font-[var(--font-sora,ui-sans-serif)] text-[#f8fafc] shadow-[0_24px_80px_rgba(0,0,0,0.42)]">
+      <div className="border-b border-zinc-800/60 px-6 pt-10 pb-5">
+        <div
+          className={cn(
+            "bg-[#0a0a0f] p-0 transition-shadow duration-300",
+            isExpense
+              ? "shadow-[0_0_64px_rgba(244,63,94,0.18)]"
+              : "shadow-[0_0_64px_rgba(52,211,153,0.18)]",
+          )}
+        >
+          <p className="mb-1 text-xs font-medium tracking-[0.22em] text-zinc-500 uppercase">
+            Amount
+          </p>
+          <label htmlFor="amount" className="sr-only">
+            Amount
+          </label>
+          <div className="flex min-w-0 items-baseline gap-1">
+            <span className="text-4xl font-light text-zinc-400">$</span>
+            <input
+              id="amount"
+              inputMode="decimal"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder={amountDisplay}
+              value={amount}
+              onChange={(event) => setAmount(event.target.value)}
+              className={cn(
+                "min-w-0 flex-1 [appearance:textfield] bg-transparent text-[clamp(56px,17vw,80px)] leading-none font-extralight tracking-normal tabular-nums outline-none placeholder:text-zinc-700 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none",
+                amount ? s.text : "text-zinc-700",
               )}
-              {errors.categoryId ? (
-                <p className="text-sm font-medium text-red-600">{errors.categoryId}</p>
-              ) : null}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="date">Date</Label>
-              <Input
-                id="date"
-                type="date"
-                value={date}
-                onChange={(event) => updateDate(event.target.value)}
-                disabled={isSaving}
-                aria-invalid={Boolean(errors.date)}
-                className="h-12 rounded-xl border-emerald-100 bg-white px-3 focus-visible:border-emerald-600 focus-visible:ring-emerald-600/20"
-              />
-              {errors.date ? (
-                <p className="text-sm font-medium text-red-600">{errors.date}</p>
-              ) : null}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="note">Note</Label>
-              <Textarea
-                id="note"
-                placeholder="Optional note"
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-                disabled={isSaving}
-                className="min-h-24 resize-none rounded-xl border-emerald-100 bg-white focus-visible:border-emerald-600 focus-visible:ring-emerald-600/20"
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="sticky bottom-20 z-10 rounded-2xl bg-zinc-50/95 pt-1 pb-2 backdrop-blur">
-          <Button
-            type="submit"
-            disabled={isSaving || visibleCategories.length === 0 || !selectedCategoryId}
-            className="h-13 w-full rounded-xl bg-emerald-700 text-base font-semibold text-white shadow-lg shadow-emerald-900/15 hover:bg-emerald-800"
-          >
-            {isSaving ? <Loader2 className="animate-spin" /> : <Save />}
-            {isSaving ? "Saving" : "Save transaction"}
-          </Button>
+            />
+            <span
+              className={cn("h-15 w-0.5 animate-pulse rounded-full bg-gradient-to-b", s.gradient)}
+            />
+          </div>
         </div>
-      </form>
-    </>
+      </div>
+
+      <div className="border-b border-zinc-800/60 pb-5">
+        <p className="px-6 pt-5 pb-3 text-[10px] font-medium tracking-[0.15em] text-zinc-600 uppercase">
+          Type
+        </p>
+        <div className="relative mx-6 flex gap-1 rounded-2xl bg-zinc-900 p-1">
+          <span
+            className={cn(
+              "absolute top-1 bottom-1 w-[calc(50%-0.25rem)] rounded-xl bg-gradient-to-r transition-transform duration-300 ease-out",
+              s.gradient,
+              s.glow,
+              isExpense ? "translate-x-0" : "translate-x-[calc(100%+0.25rem)]",
+            )}
+          />
+          {(["expense", "income"] as const).map((item) => {
+            const active = type === item;
+
+            return (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setType(item)}
+                className={cn(
+                  "relative z-10 flex-1 rounded-xl py-3 text-sm font-semibold capitalize transition-colors duration-300",
+                  active ? "text-white" : "text-zinc-500 hover:text-zinc-300",
+                )}
+              >
+                {item}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="border-b border-zinc-800/60 px-6 py-5">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-[10px] font-medium tracking-[0.15em] text-zinc-600 uppercase">
+            Category
+          </h2>
+          <span className={cn("text-xs font-medium", s.text)}>Select one</span>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {categories.map((item) => {
+            const active = category === item.id;
+
+            return (
+              <div
+                key={item.id}
+                className={cn(
+                  item.id === "other" && "col-span-3",
+                  "rounded-2xl p-px transition-all duration-200",
+                  active ? cn("bg-gradient-to-br", s.gradient, s.glow) : "bg-zinc-800",
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => setCategory(item.id)}
+                  className={cn(
+                    "flex w-full flex-col items-center justify-center gap-1.5 rounded-[calc(1rem-1px)] border py-4 transition-all duration-200",
+                    active
+                      ? "scale-[0.97] border-transparent bg-zinc-950/90"
+                      : "border-zinc-800 bg-zinc-900/60 hover:border-zinc-700",
+                  )}
+                >
+                  <span className="text-xl leading-none">{item.emoji}</span>
+                  <span className="text-[11px] leading-none font-medium text-zinc-300">
+                    {item.label}
+                  </span>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="border-b border-zinc-800/60 px-6 py-5">
+        <div className="flex items-center justify-between text-sm">
+          <div className="flex items-center gap-2 text-zinc-500">
+            <CalendarDays className={cn("size-4", s.text)} />
+            <span className="font-medium">Date</span>
+          </div>
+          <p className="text-right font-medium text-zinc-300">Today · May 05</p>
+        </div>
+
+        <div className="mt-4">
+          <label
+            htmlFor="note"
+            className="mb-1 flex items-center gap-2 text-[10px] font-medium tracking-[0.15em] text-zinc-600 uppercase"
+          >
+            <PencilLine className={cn("size-3.5", s.text)} />
+            Note
+          </label>
+          <textarea
+            id="note"
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            placeholder="Add context..."
+            rows={3}
+            className="max-h-20 min-h-20 w-full resize-none border-0 bg-transparent text-sm leading-7 text-zinc-200 outline-none placeholder:text-zinc-700"
+          />
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={handleSave}
+        className={cn(
+          "mx-6 mt-5 flex w-[calc(100%-3rem)] items-center justify-center gap-2 rounded-2xl bg-gradient-to-r py-5 text-base font-bold text-white transition-transform duration-150",
+          s.gradient,
+          s.glow,
+          canSave ? "active:scale-95" : "cursor-not-allowed opacity-50",
+        )}
+      >
+        {saved ? <Check className="size-5" /> : null}
+        {saved ? "Saved" : "Save entry"}
+      </button>
+    </section>
   );
 }
