@@ -7,6 +7,8 @@
     "build": "next build",
     "codegen": "convex codegen",
     "vercel-build": "convex deploy --cmd \"npm run codegen && npm run build\"",
+    "convex:deploy:prod": "convex deploy",
+    "convex:seed:prod": "convex run --prod categories:seedDefaults",
     "start": "next start",
     "lint": "eslint",
     "format": "prettier --write .",

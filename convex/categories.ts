@@ -14,6 +14,8 @@ export const seedDefaults = mutation({
     const existing = await ctx.db.query("categories").collect();
     const existingByName = new Map(existing.map((category) => [category.name, category]));
     let inserted = 0;
+    let patched = 0;
+    let unchanged = 0;
 
     for (const category of DEFAULT_CATEGORY_DEFINITIONS) {
       const current = existingByName.get(category.name);
@@ -29,6 +31,9 @@ export const seedDefaults = mutation({
             sortOrder: category.sortOrder,
             isDefault: true,
           });
+          patched += 1;
+        } else {
+          unchanged += 1;
         }
 
         continue;
@@ -45,7 +50,9 @@ export const seedDefaults = mutation({
 
     return {
       inserted,
-      skipped: inserted === 0,
+      patched,
+      unchanged,
+      totalDefaults: DEFAULT_CATEGORY_DEFINITIONS.length,
     };
   },
 });

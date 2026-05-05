@@ -10,7 +10,9 @@ export default defineSchema({
     kind: v.union(v.literal("expense"), v.literal("income"), v.literal("both")),
     sortOrder: v.number(),
     isDefault: v.boolean(),
-  }).index("by_sortOrder", ["sortOrder"]),
+  })
+    .index("by_name", ["name"])
+    .index("by_sortOrder", ["sortOrder"]),
 
   transactions: defineTable({
     amount: v.number(),
