@@ -36,9 +36,9 @@ export function SafeBalanceStatus({
 }: SafeBalanceStatusProps) {
   if (isLoading) {
     return (
-      <Card className="border-emerald-100 bg-white shadow-sm">
-        <CardContent className="flex min-h-36 items-center justify-center">
-          <div className="flex items-center gap-2 text-sm font-medium text-emerald-800">
+      <Card className="rounded-2xl border border-zinc-800/50 bg-zinc-900">
+        <CardContent className="flex min-h-36 items-center justify-center p-4">
+          <div className="flex items-center gap-2 text-sm font-medium text-zinc-300">
             <Loader2 className="size-4 animate-spin" aria-hidden="true" />
             Loading safe balance
           </div>
@@ -60,17 +60,17 @@ export function SafeBalanceStatus({
 
   if (!hasConfiguredSafeBalance) {
     return (
-      <Card className="border-dashed border-emerald-200 bg-emerald-50/70 shadow-sm">
-        <CardContent className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <Card className="rounded-2xl border border-zinc-700/50 bg-zinc-800/60">
+        <CardContent className="flex min-w-0 flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 space-y-1">
-            <p className="font-medium text-emerald-950">Set your monthly safe balance in Settings.</p>
-            <p className="text-sm text-emerald-800">
+            <p className="font-medium text-zinc-300">Set your monthly safe balance in Settings.</p>
+            <p className="text-sm text-zinc-500">
               Review can protect spending once {monthKey} has a safe balance goal.
             </p>
           </div>
           <Link
             href="/settings"
-            className="inline-flex h-11 shrink-0 items-center justify-center rounded-xl bg-emerald-700 px-4 text-sm font-medium text-white hover:bg-emerald-800"
+            className="inline-flex h-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-semibold text-black hover:bg-emerald-400"
           >
             Open Settings
           </Link>
@@ -87,27 +87,27 @@ export function SafeBalanceStatus({
     <section className="min-w-0 space-y-3">
       <Card
         className={cn(
-          "border bg-white shadow-sm",
-          isSafe ? "border-emerald-100" : "border-red-200",
+          "rounded-2xl border bg-zinc-900",
+          isSafe ? "border-zinc-800/50" : "border-zinc-700/50",
         )}
       >
-        <CardContent className="min-w-0 space-y-4">
+        <CardContent className="min-w-0 space-y-4 p-4">
           <div className="flex min-w-0 items-start gap-3">
             <span
               className={cn(
-                "flex size-10 shrink-0 items-center justify-center rounded-full border",
+                "flex size-10 shrink-0 items-center justify-center rounded-full bg-zinc-800",
                 isSafe
-                  ? "border-emerald-100 bg-emerald-50 text-emerald-800"
-                  : "border-red-200 bg-red-50 text-red-700",
+                  ? "text-emerald-400"
+                  : "text-rose-400",
               )}
             >
               <StatusIcon className="size-5" aria-hidden="true" />
             </span>
             <div className="min-w-0 space-y-1">
-              <p className={cn("font-semibold", isSafe ? "text-emerald-950" : "text-red-800")}>
+              <p className={cn("font-semibold", isSafe ? "text-white" : "text-rose-400")}>
                 {statusLabel}
               </p>
-              <p className="text-sm text-zinc-600">
+              <p className="text-sm text-zinc-300">
                 {isSafe
                   ? "You are above your protected safe balance."
                   : "Warning: you have reached or crossed your protected safe balance."}
@@ -133,7 +133,7 @@ export function SafeBalanceStatus({
               value={safeSummary.availableToSpend}
               currency={safeSummary.currency}
               icon={StatusIcon}
-              valueClassName={isSafe ? "text-emerald-800" : "text-red-700"}
+              valueClassName={isSafe ? "text-emerald-400" : "text-rose-400"}
             />
           </div>
         </CardContent>
@@ -156,12 +156,12 @@ function SafeBalanceMetric({
   valueClassName?: string;
 }) {
   return (
-    <div className="min-w-0 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+    <div className="min-w-0 rounded-xl border border-zinc-800/50 bg-zinc-900 p-3">
       <div className="mb-2 flex min-w-0 items-center gap-2">
-        <Icon className="size-4 shrink-0 text-emerald-800" aria-hidden="true" />
-        <p className="min-w-0 break-words text-sm font-medium text-zinc-600">{label}</p>
+        <Icon className="size-4 shrink-0 text-zinc-500" aria-hidden="true" />
+        <p className="min-w-0 break-words text-xs font-medium text-zinc-500">{label}</p>
       </div>
-      <p className={cn("break-words text-lg font-semibold tabular-nums text-emerald-950", valueClassName)}>
+      <p className={cn("break-words text-lg font-semibold tabular-nums text-white", valueClassName)}>
         {formatCurrency(value, currency)}
       </p>
     </div>

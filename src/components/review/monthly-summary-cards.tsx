@@ -24,15 +24,15 @@ const loadingCards = ["Income", "Expenses", "Current balance", "Net change"];
 export function MonthlySummaryCards({ summary, isLoading }: MonthlySummaryCardsProps) {
   if (isLoading) {
     return (
-      <section className="grid min-w-0 gap-3 sm:grid-cols-2">
+      <section className="grid min-w-0 grid-cols-2 gap-3">
         {loadingCards.map((label) => (
-          <Card key={label} className="border-emerald-100 bg-white shadow-sm">
-            <CardContent className="flex min-h-28 items-center justify-between gap-3">
+          <Card key={label} className="rounded-2xl border border-zinc-800/50 bg-zinc-900 py-0">
+            <CardContent className="flex min-h-28 items-center justify-between gap-3 p-4">
               <div className="space-y-2">
-                <p className="text-sm font-medium text-zinc-600">{label}</p>
-                <div className="h-6 w-28 rounded-full bg-emerald-50" />
+                <p className="text-xs text-zinc-500">{label}</p>
+                <div className="h-6 w-20 rounded-full bg-zinc-800" />
               </div>
-              <Loader2 className="size-5 animate-spin text-emerald-700" aria-hidden="true" />
+              <Loader2 className="size-4 animate-spin text-zinc-500" aria-hidden="true" />
             </CardContent>
           </Card>
         ))}
@@ -62,77 +62,68 @@ export function MonthlySummaryCards({ summary, isLoading }: MonthlySummaryCardsP
       value: safeSummary.totalIncome,
       prefix: "+",
       icon: ArrowUpCircle,
-      className: "border-emerald-100 bg-emerald-50/70 text-emerald-800",
-      valueClassName: "text-emerald-800",
-      helper: "Money in this month",
+      iconClassName: "text-emerald-400",
+      valueClassName: "text-emerald-400",
     },
     {
       label: "Expenses",
       value: safeSummary.totalExpenses,
       prefix: "-",
       icon: ArrowDownCircle,
-      className: "border-zinc-200 bg-zinc-50 text-zinc-700",
-      valueClassName: "text-zinc-950",
-      helper: "Money out this month",
+      iconClassName: "text-rose-400",
+      valueClassName: "text-rose-400",
     },
     {
-      label: "Current balance",
+      label: "Balance",
       value: safeSummary.currentBalance,
       prefix: "",
       icon: Wallet,
-      className: "border-emerald-100 bg-white text-emerald-800",
-      valueClassName: "text-emerald-950",
-      helper: "Starting balance plus net change",
+      iconClassName: "text-white",
+      valueClassName: "text-white",
     },
     {
       label: "Net change",
       value: safeSummary.netChange,
       prefix: safeSummary.netChange > 0 ? "+" : "",
       icon: Scale,
-      className: "border-emerald-100 bg-white text-emerald-800",
-      valueClassName: safeSummary.netChange >= 0 ? "text-emerald-800" : "text-red-700",
-      helper: "Income minus expenses",
+      iconClassName: "text-white",
+      valueClassName: "text-white",
     },
   ];
 
   return (
     <section className="min-w-0 space-y-3">
       {!hasActivity ? (
-        <Card className="border-dashed border-emerald-200 bg-emerald-50/70 shadow-sm">
-          <CardContent className="space-y-1 py-4">
-            <p className="font-medium text-emerald-950">No monthly summary activity yet.</p>
-            <p className="text-sm text-emerald-800">
+        <Card className="rounded-2xl border border-zinc-800/50 bg-zinc-900">
+          <CardContent className="space-y-1 p-4">
+            <p className="font-medium text-white">No monthly summary activity yet.</p>
+            <p className="text-sm text-zinc-500">
               Add income, expenses, or monthly settings to update these balance cards.
             </p>
           </CardContent>
         </Card>
       ) : null}
 
-      <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+      <div className="grid min-w-0 grid-cols-2 gap-3">
         {cards.map((card) => (
-          <Card key={card.label} className="min-w-0 border-emerald-100 bg-white shadow-sm">
-            <CardContent className="flex min-h-32 min-w-0 items-start justify-between gap-3">
+          <Card
+            key={card.label}
+            className="min-w-0 overflow-hidden rounded-2xl border border-zinc-800/50 bg-zinc-900 py-0"
+          >
+            <CardContent className="flex min-h-28 min-w-0 items-start justify-between gap-3 p-4">
               <div className="min-w-0 space-y-2">
-                <p className="text-sm font-medium text-zinc-600">{card.label}</p>
+                <p className="text-xs text-zinc-500">{card.label}</p>
                 <p
                   className={cn(
-                    "break-words text-2xl font-semibold tabular-nums",
+                    "overflow-hidden text-lg font-semibold whitespace-nowrap tabular-nums",
                     card.valueClassName,
                   )}
                 >
                   {card.prefix}
                   {formatCurrency(Math.abs(card.value), safeSummary.currency)}
                 </p>
-                <p className="text-xs font-medium text-zinc-500">{card.helper}</p>
               </div>
-              <span
-                className={cn(
-                  "flex size-10 shrink-0 items-center justify-center rounded-full border",
-                  card.className,
-                )}
-              >
-                <card.icon className="size-5" aria-hidden="true" />
-              </span>
+              <card.icon className={cn("size-4 shrink-0", card.iconClassName)} aria-hidden="true" />
             </CardContent>
           </Card>
         ))}
