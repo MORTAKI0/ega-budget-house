@@ -6,8 +6,7 @@ export default function AddPage() {
   return (
     <AppShell>
       <header className="mx-auto w-full max-w-[420px] font-[var(--font-sora,inherit)]">
-        <h1 className="text-3xl font-semibold tracking-normal text-[#f8fafc]">New entry</h1>
-        <p className="mt-1 text-sm font-medium text-[#475569]">Record a transaction</p>
+        <h1 className="text-3xl font-bold tracking-normal text-[#f8fafc]">Add</h1>
       </header>
       <AddTransactionForm />
     </AppShell>
